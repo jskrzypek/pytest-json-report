@@ -28,7 +28,7 @@ class JSONReportBase:
         # If the user sets --tb=no, always omit the traceback from the report
         if self._config.option.tbstyle == 'no' and \
            not self._must_omit('traceback'):
-            self._config.option.json_report_omit.append('traceback')
+            self._config.option.jest_report_omit.append('traceback')
 
     def pytest_addhooks(self, pluginmanager):
         pluginmanager.add_hookspecs(Hooks)
@@ -109,7 +109,7 @@ class JSONReportBase:
             del item._json_report_extra['metadata']
 
     def _must_omit(self, key):
-        return key in self._config.option.json_report_omit
+        return key in self._config.option.jest_report_omit
 
 
 class JSONReport(JSONReportBase):
@@ -196,6 +196,19 @@ class JSONReport(JSONReportBase):
             traceback,
         )
 
+    def try_add_snapshot(self):
+        try:
+            from snapshottest.module import SnapshotModule
+            return {
+                'successful': SnapshotModule.stats_successful_snapshots(),
+                'failed': SnapshotModule.stats_failed_snapshots()[0],
+                'added': SnapshotModule.stats_new_snapshots()[0],
+                'matched': SnapshotModule.stats_visited_snapshots()[0],
+                'unmatched': SnapshotModule.stats_unvisited_snapshots()[0],
+            }
+        except ImportError:
+            return {}
+
     @pytest.hookimpl(tryfirst=True)
     def pytest_sessionfinish(self, session):
         json_report = serialize.make_report(
@@ -206,8 +219,9 @@ class JSONReport(JSONReportBase):
             environment=getattr(self._config, '_metadata', {}),
             summary=serialize.make_summary(self._json_tests,
                                            collected=session.testscollected),
+            snapshot=self.try_add_snapshot(),
         )
-        if not self._config.option.json_report_summary:
+        if not self._config.option.jest_report_summary:
             if self._json_collectors:
                 json_report['collectors'] = self._json_collectors
             json_report['tests'] = list(self._json_tests.values())
@@ -218,7 +232,7 @@ class JSONReport(JSONReportBase):
         # After the session has finished, other scripts may want to use report
         # object directly
         self.report = json_report
-        path = self._config.option.json_report_file
+        path = self._config.option.jest_report_file
         if path:
             self.save_report(path)
         else:
@@ -245,7 +259,7 @@ class JSONReport(JSONReportBase):
                 json_report,
                 f,
                 default=str,
-                indent=self._config.option.json_report_indent,
+                indent=self._config.option.jest_report_indent,
             )
             self._terminal_summary.append(
                 'JSON report written to: %s (%d bytes)' % (path, f.tell()))
@@ -317,7 +331,7 @@ def json_metadata(request):
     try:
         return request.node._json_report_extra.setdefault('metadata', {})
     except AttributeError:
-        if not request.config.option.json_report:
+        if not request.config.option.jest_report:
             # The user didn't request a JSON report, so the plugin didn't
             # prepare a metadata context. We return a dummy dict, so the
             # fixture can be used as expected without causing internal errors.
@@ -328,29 +342,29 @@ def json_metadata(request):
 def pytest_addoption(parser):
     group = parser.getgroup('jsonreport', 'reporting test results as JSON')
     group.addoption(
-        '--json-report', default=False, action='store_true',
+        '--jest-report', default=False, action='store_true',
         help='create JSON report')
     group.addoption(
-        '--json-report-file', default='.report.json',
+        '--jest-report-file', default='.report.json',
         # The case-insensitive string "none" will make the value None
         type=lambda x: None if x.lower() == 'none' else x,
         help='target path to save JSON report (use "none" to not save the '
         'report)')
     group.addoption(
-        '--json-report-omit', default=[], nargs='+', help='list of fields to '
+        '--jest-report-omit', default=[], nargs='+', help='list of fields to '
         'omit in the report (choose from: collectors, log, traceback, '
         'streams, warnings, keywords)')
     group.addoption(
-        '--json-report-summary', default=False,
+        '--jest-report-summary', default=False,
         action='store_true', help='only create a summary without per-test '
         'details')
     group.addoption(
-        '--json-report-indent', type=int, help='pretty-print JSON with '
+        '--jest-report-indent', type=int, help='pretty-print JSON with '
         'specified indentation level')
 
 
 def pytest_configure(config):
-    if not config.option.json_report:
+    if not config.option.jest_report:
         return
     if hasattr(config, 'workerinput'):
         Plugin = JSONReportWorker
